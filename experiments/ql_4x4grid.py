@@ -1,6 +1,8 @@
 import argparse
 import os
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
@@ -14,22 +16,25 @@ else:
 from sumo_rl import SumoEnvironment
 from sumo_rl.agents import QLAgent
 from sumo_rl.exploration import EpsilonGreedy
+from sumo_rl.environment.observations import PedestrianObservationFunction
 
 
 if __name__ == "__main__":
     alpha = 0.1
     gamma = 0.99
     decay = 1
-    runs = 30
-    episodes = 4
+    runs = 1
+    episodes = 1
 
     env = SumoEnvironment(
         net_file="sumo_rl/nets/4x4-Lucas/4x4.net.xml",
-        route_file="sumo_rl/nets/4x4-Lucas/4x4c1c2c1c2.rou.xml",
+        route_file="sumo_rl/nets/4x4-Lucas/4x4c1c2c1c2_pedestres.rou.xml",
         use_gui=False,
-        num_seconds=80000,
+        num_seconds=10000,
         min_green=5,
         delta_time=5,
+        reward_fn="pedestrian-waiting-time",
+        observation_class=PedestrianObservationFunction,
     )
 
     for run in range(1, runs + 1):

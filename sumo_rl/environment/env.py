@@ -427,19 +427,29 @@ class SumoEnvironment(gym.Env):
         speeds = [self.sumo.vehicle.getSpeed(vehicle) for vehicle in vehicles]
         waiting_times = [self.sumo.vehicle.getWaitingTime(vehicle) for vehicle in vehicles]
         num_backlogged_vehicles = len(self.sumo.simulation.getPendingVehicles())
+        
+        # Coleta de pedestres em todo o sistema
+        all_peds = self.sumo.person.getIDList()
+        ped_waiting_times = [self.sumo.person.getWaitingTime(p) for p in all_peds]
+        ped_speeds = [self.sumo.person.getSpeed(p) for p in all_peds]
+        
         return {
             "system_total_running": len(vehicles),
             "system_total_backlogged": num_backlogged_vehicles,
-            "system_total_stopped": sum(
-                int(speed < 0.1) for speed in speeds
-            ),  # In SUMO, a vehicle is considered halting if its speed is below 0.1 m/s
+            "system_total_stopped": sum(int(speed < 0.1) for speed in speeds),
             "system_total_arrived": self.num_arrived_vehicles,
             "system_total_departed": self.num_departed_vehicles,
             "system_total_teleported": self.num_teleported_vehicles,
             "system_total_waiting_time": sum(waiting_times),
             "system_mean_waiting_time": 0.0 if len(vehicles) == 0 else np.mean(waiting_times),
             "system_mean_speed": 0.0 if len(vehicles) == 0 else np.mean(speeds),
+            # === NOVAS COLUNAS NO CSV ===
+            "system_total_pedestrians": len(all_peds),
+            "system_total_pedestrians_waiting": sum(int(s < 0.1 or w > 0) for s, w in zip(ped_speeds, ped_waiting_times)),
+            "system_total_pedestrian_waiting_time": sum(ped_waiting_times),
+            "system_mean_pedestrian_waiting_time": 0.0 if len(all_peds) == 0 else float(np.mean(ped_waiting_times)),
         }
+
 
     def _get_per_agent_info(self):
         stopped = [self.traffic_signals[ts].get_total_queued() for ts in self.ts_ids]
@@ -447,14 +457,24 @@ class SumoEnvironment(gym.Env):
             sum(self.traffic_signals[ts].get_accumulated_waiting_time_per_lane()) for ts in self.ts_ids
         ]
         average_speed = [self.traffic_signals[ts].get_average_speed() for ts in self.ts_ids]
+        
+        # Pedestres específicos de cada semáforo
+        ped_stopped = [self.traffic_signals[ts].get_pedestrians_waiting_count() for ts in self.ts_ids]
+        ped_waiting_time = [self.traffic_signals[ts].get_pedestrians_waiting_time() for ts in self.ts_ids]
+
         info = {}
         for i, ts in enumerate(self.ts_ids):
             info[f"{ts}_stopped"] = stopped[i]
             info[f"{ts}_accumulated_waiting_time"] = accumulated_waiting_time[i]
             info[f"{ts}_average_speed"] = average_speed[i]
+            # === NOVAS COLUNAS NO CSV POR AGENTE ===
+            info[f"{ts}_pedestrians_waiting"] = ped_stopped[i]
+            info[f"{ts}_pedestrians_waiting_time"] = ped_waiting_time[i]
+
         info["agents_total_stopped"] = sum(stopped)
         info["agents_total_accumulated_waiting_time"] = sum(accumulated_waiting_time)
         return info
+
 
     def close(self):
         """Close the environment and stop the SUMO simulation."""

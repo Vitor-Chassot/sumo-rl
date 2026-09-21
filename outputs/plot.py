@@ -12,7 +12,7 @@ sns.set(
     style="darkgrid",
     rc={
         "figure.figsize": (7.2, 4.45),
-        "text.usetex": True,
+        "text.usetex": False,
         "xtick.labelsize": 16,
         "ytick.labelsize": 16,
         "font.size": 15,
@@ -64,11 +64,13 @@ if __name__ == "__main__":
     prs.add_argument("-l", nargs="+", default=None, help="File's legends\n")
     prs.add_argument("-t", type=str, default="", help="Plot title\n")
     prs.add_argument("-yaxis", type=str, default="system_total_waiting_time", help="The column to plot.\n")
+    prs.add_argument("-yaxis2", type=str, default=None, help="Second column to plot on the same chart (e.g. system_total_pedestrian_waiting_time).\n")
     prs.add_argument("-xaxis", type=str, default="step", help="The x axis.\n")
     prs.add_argument("-ma", type=int, default=1, help="Moving Average Window.\n")
     prs.add_argument("-sep", type=str, default=",", help="Values separator on file.\n")
     prs.add_argument("-xlabel", type=str, default="Time step (seconds)", help="X axis label.\n")
     prs.add_argument("-ylabel", type=str, default="Total waiting time (s)", help="Y axis label.\n")
+    prs.add_argument("-ylabel2", type=str, default=None, help="Label for the second y-axis column.\n")
     prs.add_argument("-output", type=str, default=None, help="PDF output filename.\n")
 
     args = prs.parse_args()
@@ -77,6 +79,7 @@ if __name__ == "__main__":
     plt.figure()
 
     # File reading and grouping
+    all_dfs = []
     for file in args.f:
         main_df = pd.DataFrame()
         for f in glob.glob(file + "*"):
@@ -85,14 +88,30 @@ if __name__ == "__main__":
                 main_df = df
             else:
                 main_df = pd.concat((main_df, df))
+        all_dfs.append(main_df)
 
-        # Plot DataFrame
+        # Plot primary y-axis column
         plot_df(main_df, xaxis=args.xaxis, yaxis=args.yaxis, label=next(labels), color=next(colors), ma=args.ma)
+
+    # Plot second y-axis column (pedestrians) using the same DataFrames
+    if args.yaxis2 is not None:
+        ylabel2 = args.ylabel2 if args.ylabel2 is not None else args.yaxis2
+        ped_labels = cycle(args.l) if args.l is not None else cycle([str(i) for i in range(len(args.f))])
+        for main_df in all_dfs:
+            plot_df(
+                main_df,
+                xaxis=args.xaxis,
+                yaxis=args.yaxis2,
+                label=f"{next(ped_labels)} (pedestrians)",
+                color=next(colors),
+                ma=args.ma,
+            )
 
     plt.title(args.t)
     plt.ylabel(args.ylabel)
     plt.xlabel(args.xlabel)
     plt.ylim(bottom=0)
+    plt.legend()
 
     if args.output is not None:
         plt.savefig(args.output + ".pdf", bbox_inches="tight")

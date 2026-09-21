@@ -87,6 +87,7 @@ class TrafficSignal:
         self.next_action_time = begin_time
         self.last_ts_waiting_time = 0.0
         self.last_reward = None
+        self.last_ped_waiting_time = 0.0
         self.reward_fn = reward_fn
         self.reward_weights = reward_weights
         self.sumo = sumo
@@ -108,9 +109,15 @@ class TrafficSignal:
         self._build_phases()
 
         self.lanes = list(
-            dict.fromkeys(self.sumo.trafficlight.getControlledLanes(self.id))
-        )  # Remove duplicates and keep order
-        self.out_lanes = [link[0][1] for link in self.sumo.trafficlight.getControlledLinks(self.id) if link]
+            dict.fromkeys(
+                [lane for lane in self.sumo.trafficlight.getControlledLanes(self.id) if not lane.startswith(":")]
+            )
+        )
+        # Identifica as arestas que chegam a este semáforo para monitorar os pedestres
+        self.incoming_edges = list(dict.fromkeys(self.sumo.junction.getIncomingEdges(self.id)))
+  
+        # Remove duplicates and keep order
+        self.out_lanes = [link[0][1] for link in self.sumo.trafficlight.getControlledLinks(self.id) if link and not link[0][1].startswith(":")]
         self.out_lanes = list(set(self.out_lanes))
         self.lanes_length = {lane: self.sumo.lane.getLength(lane) for lane in self.lanes + self.out_lanes}
 
@@ -140,6 +147,12 @@ class TrafficSignal:
         self.num_green_phases = len(self.green_phases)
         self.all_phases = self.green_phases.copy()
 
+        controlled_links = self.sumo.trafficlight.getControlledLinks(self.id)
+        ped_link_indices = {
+            idx for idx, link in enumerate(controlled_links)
+            if link and link[0][0].startswith(":")
+        }
+
         for i, p1 in enumerate(self.green_phases):
             for j, p2 in enumerate(self.green_phases):
                 if i == j:
@@ -147,7 +160,10 @@ class TrafficSignal:
                 yellow_state = ""
                 for s in range(len(p1.state)):
                     if (p1.state[s] == "G" or p1.state[s] == "g") and (p2.state[s] == "r" or p2.state[s] == "s"):
-                        yellow_state += "y"
+                        if s in ped_link_indices:
+                            yellow_state += "r"
+                        else:
+                            yellow_state += "y"
                     else:
                         yellow_state += p1.state[s]
                 self.yellow_dict[(i, j)] = len(self.all_phases)
@@ -188,6 +204,17 @@ class TrafficSignal:
         if self.enforce_max_green and new_phase == self.green_phase and self.time_since_last_phase_change >= self.max_green:
             new_phase = (self.green_phase + 1) % self.num_green_phases  # Next phase is activated
 
+        # Prevenção de inanição (starvation) de pedestres: se houver pedestre aguardando há >= 90s, aciona fase de pedestres
+        self.ped_starvation_penalty = 0.0
+        if self.enforce_max_green:
+            peds = self.get_pedestrians_at_intersection()
+            if peds:
+                max_ped_wait = max([self.sumo.person.getWaitingTime(p) for p in peds] or [0.0])
+                if max_ped_wait >= 90.0:
+                    # Penalidade no gradiente de recompensa para o DQN aprender a abrir a fase antes de estourar 90s
+                    self.ped_starvation_penalty = - (max_ped_wait - 90.0) / 10.0
+                    new_phase = self.num_green_phases - 1
+
         if self.green_phase == new_phase or self.time_since_last_phase_change < self.yellow_time + self.min_green:
             # self.sumo.trafficlight.setPhase(self.id, self.green_phase)
             self.sumo.trafficlight.setRedYellowGreenState(self.id, self.all_phases[self.green_phase].state)
@@ -207,14 +234,14 @@ class TrafficSignal:
         return self.observation_fn()
 
     def compute_reward(self) -> Union[float, np.ndarray]:
-        """Computes the reward of the traffic signal. If it is a list of rewards, it returns a numpy array."""
-        if self.reward_dim == 1:
+        if len(self.reward_list) == 1:
             self.last_reward = self.reward_list[0](self)
         else:
-            self.last_reward = np.array([reward_fn(self) for reward_fn in self.reward_list], dtype=np.float32)
+            rewards = np.array([reward_fn(self) for reward_fn in self.reward_list], dtype=np.float32)
             if self.reward_weights is not None:
-                self.last_reward = np.dot(self.last_reward, self.reward_weights)  # Linear combination of rewards
-
+                self.last_reward = float(np.dot(rewards, self.reward_weights))
+            else:
+                self.last_reward = rewards
         return self.last_reward
 
     def _pressure_reward(self):
@@ -228,6 +255,13 @@ class TrafficSignal:
 
     def _co2_reward(self):
         return -self.get_total_co2()
+    
+    def _pedestrian_waiting_time_reward(self):
+        ped_wait = self.get_pedestrians_waiting_time() / 100.0
+        penalty = getattr(self, "ped_starvation_penalty", 0.0)
+        reward = (self.last_ped_waiting_time - ped_wait) + penalty
+        self.last_ped_waiting_time = ped_wait
+        return reward
 
     def _diff_waiting_time_reward(self):
         ts_wait = sum(self.get_accumulated_waiting_time_per_lane()) / 100.0
@@ -331,6 +365,32 @@ class TrafficSignal:
         for lane in self.lanes:
             veh_list += self.sumo.lane.getLastStepVehicleIDs(lane)
         return veh_list
+        
+    def get_pedestrians_at_intersection(self) -> List[str]:
+        """Retorna os IDs de todos os pedestres nas arestas de entrada deste semáforo."""
+        pedestrians = []
+        for edge in self.incoming_edges:
+            pedestrians.extend(self.sumo.edge.getLastStepPersonIDs(edge))
+        return list(set(pedestrians))
+
+    def get_pedestrians_waiting_count(self) -> int:
+        """Retorna a quantidade de pedestres parados (esperando) no cruzamento."""
+        return sum(
+            1 for p in self.get_pedestrians_at_intersection()
+            if self.sumo.person.getSpeed(p) < 0.1 or self.sumo.person.getWaitingTime(p) > 0
+        )
+
+    def get_pedestrians_waiting_time(self) -> float:
+        """Retorna a soma do tempo de espera de todos os pedestres parados neste semáforo."""
+        return sum(
+            self.sumo.person.getWaitingTime(p)
+            for p in self.get_pedestrians_at_intersection()
+        )
+
+    def get_pedestrians_density(self, max_ped: float = 30.0) -> float:
+        """Retorna a densidade normalizada [0, 1] de pedestres aguardando."""
+        return min(1.0, self.get_pedestrians_waiting_count() / max_ped)
+
 
     @classmethod
     def register_reward_fn(cls, fn: Callable):
@@ -350,4 +410,5 @@ class TrafficSignal:
         "queue": _queue_reward,
         "pressure": _pressure_reward,
         "co2": _co2_reward,
+        "pedestrian-waiting-time": _pedestrian_waiting_time_reward,
     }

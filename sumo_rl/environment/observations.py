@@ -16,14 +16,15 @@ class ObservationFunction:
         self.ts = ts
 
     @abstractmethod
-    def __call__(self):
+    def __call__(self) -> np.ndarray:
         """Subclasses must override this method."""
         pass
 
     @abstractmethod
-    def observation_space(self):
+    def observation_space(self) -> spaces.Box:
         """Subclasses must override this method."""
         pass
+
 
 
 class DefaultObservationFunction(ObservationFunction):
@@ -41,10 +42,39 @@ class DefaultObservationFunction(ObservationFunction):
         queue = self.ts.get_lanes_queue()
         observation = np.array(phase_id + min_green + density + queue, dtype=np.float32)
         return observation
-
+    
     def observation_space(self) -> spaces.Box:
         """Return the observation space."""
         return spaces.Box(
             low=np.zeros(self.ts.num_green_phases + 1 + 2 * len(self.ts.lanes), dtype=np.float32),
             high=np.ones(self.ts.num_green_phases + 1 + 2 * len(self.ts.lanes), dtype=np.float32),
         )
+class PedestrianObservationFunction(ObservationFunction):
+    """Função de observação que inclui dados de veículos e de pedestres."""
+
+    def __init__(self, ts: TrafficSignal):
+        super().__init__(ts)
+
+    def __call__(self) -> np.ndarray:
+        """Retorna o vetor de observação expandido com pedestres."""
+        phase_id = [1 if self.ts.green_phase == i else 0 for i in range(self.ts.num_green_phases)]
+        min_green = [0 if self.ts.time_since_last_phase_change < self.ts.min_green + self.ts.yellow_time else 1]
+        density = self.ts.get_lanes_density()
+        queue = self.ts.get_lanes_queue()
+        
+        # Novas observações de pedestres:
+        ped_density = [self.ts.get_pedestrians_density()]
+        ped_waiting_norm = [min(1.0, self.ts.get_pedestrians_waiting_time() / 300.0)]  # normalizado até 300s
+        
+        observation = np.array(phase_id + min_green + density + queue + ped_density + ped_waiting_norm, dtype=np.float32)
+        return observation
+
+    def observation_space(self) -> spaces.Box:
+        """Retorna o novo espaço de observação com +2 dimensões (ped_density e ped_waiting_norm)."""
+        dim = self.ts.num_green_phases + 1 + 2 * len(self.ts.lanes) + 2
+        return spaces.Box(
+            low=np.zeros(dim, dtype=np.float32),
+            high=np.ones(dim, dtype=np.float32),
+            dtype=np.float32,
+        )
+

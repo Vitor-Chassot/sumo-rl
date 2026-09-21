@@ -1,7 +1,11 @@
 import argparse
 import os
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from datetime import datetime
+from sumo_rl.environment.observations import PedestrianObservationFunction
 
 
 if "SUMO_HOME" in os.environ:
@@ -53,7 +57,10 @@ if __name__ == "__main__":
         num_seconds=args.seconds,
         min_green=args.min_green,
         max_green=args.max_green,
+        observation_class=PedestrianObservationFunction,
+        reward_fn="diff-waiting-time",
     )
+
 
     for run in range(1, args.runs + 1):
         initial_states = env.reset()
