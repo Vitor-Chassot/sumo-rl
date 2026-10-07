@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import gymnasium as gym
 from stable_baselines3.dqn.dqn import DQN
 import wandb
 
@@ -16,24 +15,6 @@ if "SUMO_HOME" in os.environ:
     sys.path.append(os.path.join(os.environ["SUMO_HOME"], "tools"))
 else:
     sys.exit("Please declare the environment variable 'SUMO_HOME'")
-
-
-class EpisodeSeedWrapper(gym.Wrapper):
-    """Usa uma semente do SUMO diferente (e reprodutível) a cada episódio.
-
-    Sem isso, o sumo_seed fixo é reaplicado em todo reset e todos os
-    episódios teriam exatamente as mesmas chegadas de veículos.
-    """
-
-    def __init__(self, env, base_seed: int):
-        super().__init__(env)
-        self.base_seed = base_seed
-        self.episode = 0
-
-    def reset(self, **kwargs):
-        kwargs["seed"] = self.base_seed * 10_000 + self.episode
-        self.episode += 1
-        return self.env.reset(**kwargs)
 
 
 if __name__ == "__main__":
@@ -47,12 +28,16 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------ #
     config = {
         "seed": args.seed,
+        "net_file": "sumo_rl/nets/2way-single-intersection/single-intersection.net.xml",
+        "route_file": "sumo_rl/nets/2way-single-intersection/single-intersection-stationary.rou.xml",
+        "reward_fn": "diff-waiting-time",
+        "observation": "default",
         "delta_time": 5,
         "min_green": 5,
         "max_green": 60,
         "yellow_time": 3,  # valor que o netconvert calcula para vias de 13,9 m/s
         "num_seconds": 21_600,  # 6 h por episódio
-        "num_episodes": 30,
+        "num_episodes": 10,
         "learning_rate": 1e-4,
         "buffer_size": 100_000,
         "learning_starts": 1000,
@@ -73,20 +58,19 @@ if __name__ == "__main__":
     )
 
     env = SumoEnvironment(
-        net_file="sumo_rl/nets/2way-single-intersection/single-intersection.net.xml",
-        route_file="sumo_rl/nets/2way-single-intersection/single-intersection-stationary.rou.xml",
+        net_file=config["net_file"],
+        route_file=config["route_file"],
         out_csv_name=f"outputs/2way-single-intersection/dqn_stationary_seed{args.seed}",
         single_agent=True,
         use_gui=args.gui,
         num_seconds=config["num_seconds"],
-        reward_fn="diff-waiting-time",
+        reward_fn=config["reward_fn"],
         min_green=config["min_green"],
         max_green=config["max_green"],
         enforce_max_green=True,
         delta_time=config["delta_time"],
         yellow_time=config["yellow_time"],
     )
-    env = EpisodeSeedWrapper(env, base_seed=config["seed"])
 
     model = DQN(
         env=env,

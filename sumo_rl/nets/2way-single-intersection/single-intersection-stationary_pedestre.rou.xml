@@ -1,5 +1,5 @@
 <routes>
-    <!-- Demanda estacionaria (mesmos fluxos durante toda a simulacao).
+    <!-- Demanda estacionaria com pedestres (mesmos fluxos durante toda a simulacao).
          N/S: 500 veh/h por aproximacao; E/W: 300 veh/h por aproximacao (total 1600 veh/h).
          Divisao por aproximacao: 20% direita, 60% reto, 20% esquerda.
          Chegadas aleatorias (probability = veh/h / 3600). -->
@@ -29,4 +29,17 @@
     <flow id="flow_we" route="route_we" begin="0" end="21600" probability="0.0500" departSpeed="max" departPos="base" departLane="best"/>
     <flow id="flow_wn" route="route_wn" begin="0" end="21600" probability="0.0167" departSpeed="max" departPos="base" departLane="best"/>
     <flow id="flow_ws" route="route_ws" begin="0" end="21600" probability="0.0167" departSpeed="max" departPos="base" departLane="best"/>
+    <!-- Pedestres nas duas travessias principais, em ambos os sentidos (30 pessoas/h cada). -->
+    <personFlow id="ped_ns" begin="0" end="21600" personsPerHour="30">
+        <walk edges="n_t t_s"/>
+    </personFlow>
+    <personFlow id="ped_sn" begin="0" end="21600" personsPerHour="30">
+        <walk edges="s_t t_n"/>
+    </personFlow>
+    <personFlow id="ped_we" begin="0" end="21600" personsPerHour="30">
+        <walk edges="w_t t_e"/>
+    </personFlow>
+    <personFlow id="ped_ew" begin="0" end="21600" personsPerHour="30">
+        <walk edges="e_t t_w"/>
+    </personFlow>
 </routes>
