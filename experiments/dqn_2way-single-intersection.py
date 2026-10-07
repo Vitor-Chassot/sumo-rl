@@ -24,7 +24,7 @@ if __name__ == "__main__":
         "delta_time": 5,
         "min_green": 5,
         "max_green": 60,
-        "yellow_time": 2,
+        "yellow_time": 3,
         "num_seconds": 100_000,
         "reward_weights": [0.8, 0.2],
         "learning_rate": 1e-3,
@@ -80,6 +80,7 @@ if __name__ == "__main__":
             log_system=True,
             log_per_agent=False,
             log_reward=True,
+            log_episode=True,
         ),
     )
 
